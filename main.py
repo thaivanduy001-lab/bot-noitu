@@ -1,4 +1,4 @@
-Import discord
+import discord
 import asyncio
 import re
 import random
@@ -20,7 +20,7 @@ def run_web():
 t = Thread(target=run_web)
 t.start()
 
-# Danh sách 3 kênh bạn muốn chạy
+# Danh sách kênh bạn muốn chạy
 CHANNEL_IDS = [1497266748087341076, 1485274014308892831, 1540945642686255104, 1540971960958451832, 1540972002628870215]
 client = discord.Client()
 
@@ -64,7 +64,6 @@ async def send_nt_loop():
 
 @client.event
 async def on_message(message):
-    # Kiểm tra xem tin nhắn có thuộc 1 trong 3 kênh không
     if message.channel.id not in CHANNEL_IDS:
         return
 
@@ -93,4 +92,6 @@ async def solve_and_reply(channel, start_word):
         await asyncio.sleep(random.uniform(1.2, 2.5))
         await channel.send(answer)
 
-client.run(os.getenv('DISCORD-TOKEN'))
+# Tự nhận cả 2 dạng tên biến token để tránh lỗi
+token = os.getenv('DISCORD_TOKEN') or os.getenv('DISCORD-TOKEN')
+client.run(token)
