@@ -11,16 +11,18 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Bot dang chay 24/7!"
+    return "Selfbot đang chạy 24/7!"
 
 def run_web():
     port = int(os.environ.get("PORT", 8080))
     app.run(host='0.0.0.0', port=port)
 
+# Chạy Flask Server trên Thread riêng biệt
 t = Thread(target=run_web)
+t.daemon = True
 t.start()
 
-# Danh sách 3 kênh bạn muốn chạy
+# Danh sách ID kênh chạy nối từ
 CHANNEL_IDS = [1497266748087341076, 1485274014308892831, 1540945642686255104]
 client = discord.Client()
 
@@ -35,7 +37,7 @@ def get_vietnamese_word(start_word):
             if len(words) == 2 and words[0] == start_word:
                 return word.lower()
     except Exception as e:
-        print(f"Loi tra API: {e}")
+        print(f"Lỗi tra API: {e}")
 
     backup_dict = {
         "được": "được việc", "việc": "việc làm", "làm": "làm ăn", "ăn": "ăn uống",
@@ -46,25 +48,29 @@ def get_vietnamese_word(start_word):
 
 @client.event
 async def on_ready():
-    print(f"=== ĐÃ ĐĂNG NHẬP: {client.user} ===")
-    client.loop.create_task(send_nt_loop())
+    print(f"=== ĐÃ ĐĂNG NHẬP THÀNH CÔNG: {client.user} ===")
+    # Chuẩn hóa khởi tạo task bất đồng bộ
+    asyncio.create_task(send_nt_loop())
 
 async def send_nt_loop():
     await client.wait_until_ready()
+    await asyncio.sleep(5)
+    
     while not client.is_closed():
         for ch_id in CHANNEL_IDS:
             try:
                 channel = client.get_channel(ch_id) or await client.fetch_channel(ch_id)
                 if channel:
-                    print(f"[AUTO] Gui .nt vao kenh {ch_id}...")
+                    print(f"[AUTO] Gửi .nt vào kênh {ch_id}...")
                     await channel.send(".nt")
             except Exception as e:
-                print(f"Loi gui .nt kenh {ch_id}: {e}")
+                print(f"Lỗi gửi .nt kênh {ch_id}: {e}")
+            await asyncio.sleep(2) # Nghỉ giữa các kênh
+            
         await asyncio.sleep(25)
 
 @client.event
 async def on_message(message):
-    # Kiểm tra xem tin nhắn có thuộc 1 trong 3 kênh không
     if message.channel.id not in CHANNEL_IDS:
         return
 
@@ -83,14 +89,15 @@ async def on_message(message):
     match = re.search(r"bắt đầu bằng:\s*([^\s\|]+)", full_text, re.IGNORECASE)
     if match:
         start_word = match.group(1).strip()
-        print(f"[KENH {message.channel.id}] Phat hien tu: {start_word}")
+        print(f"[KENH {message.channel.id}] Phát hiện từ: {start_word}")
         await solve_and_reply(message.channel, start_word)
 
 async def solve_and_reply(channel, start_word):
     answer = get_vietnamese_word(start_word)
     if answer:
-        print(f"[DAP AN]: {answer}")
+        print(f"[ĐÁP ÁN]: {answer}")
         await asyncio.sleep(random.uniform(1.2, 2.5))
         await channel.send(answer)
 
-client.run(os.getenv('DISCORD_TOKEN'))
+token = os.getenv('DISCORD_TOKEN') or os.getenv('DISCORD-TOKEN')
+client.run(token)
