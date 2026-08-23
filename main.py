@@ -21,8 +21,7 @@ t = Thread(target=run_web)
 t.start()
 
 # Danh sách 3 kênh bạn muốn chạy
-CHANNEL_IDS = [1497266748087341076, 1485274014308892831, 1540945642686255104, 1540971960958451832, 1540972002628870215]
-
+CHANNEL_IDS = [1497266748087341076, 1485274014308892831, 1540945642686255104]
 client = discord.Client()
 
 def get_vietnamese_word(start_word):
@@ -61,7 +60,7 @@ async def send_nt_loop():
                     await channel.send(".nt")
             except Exception as e:
                 print(f"Loi gui .nt kenh {ch_id}: {e}")
-        await asyncio.sleep(18)
+        await asyncio.sleep(25)
 
 @client.event
 async def on_message(message):
@@ -94,4 +93,4 @@ async def solve_and_reply(channel, start_word):
         await asyncio.sleep(random.uniform(1.2, 2.5))
         await channel.send(answer)
 
-client.run(os.getenv('DISCORD-TOKEN')
+client.run(os.getenv('DISCORD_TOKEN'))
