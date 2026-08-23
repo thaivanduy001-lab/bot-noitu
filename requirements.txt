@@ -1,4 +1,4 @@
-discord.py-self
-requests
+discord.py
 flask
-
+requests
+PyNaCl
