@@ -60,7 +60,7 @@ async def send_nt_loop():
                     await channel.send(".nt")
             except Exception as e:
                 print(f"Loi gui .nt kenh {ch_id}: {e}")
-        await asyncio.sleep(25)
+        await asyncio.sleep(18)
 
 @client.event
 async def on_message(message):
@@ -93,4 +93,4 @@ async def solve_and_reply(channel, start_word):
         await asyncio.sleep(random.uniform(1.2, 2.5))
         await channel.send(answer)
 
-client.run(os.getenv('DISCORD-TOKEN'))
+client.run(os.getenv('DISCORD-TOKEN')
