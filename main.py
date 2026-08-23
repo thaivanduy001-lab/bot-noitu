@@ -11,7 +11,7 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Bot dang chay 24/7!"
+    return "Selfbot dang chay 24/7!"
 
 def run_web():
     port = int(os.environ.get("PORT", 8080))
@@ -20,14 +20,16 @@ def run_web():
 t = Thread(target=run_web)
 t.start()
 
-CHANNEL_IDS = [1497266748087341076, 1485274014308892831, 1540945642686255104, 1540971960958451832, 1540972002628870215]
+CHANNEL_IDS = [
+    1497266748087341076, 
+    1485274014308892831, 
+    1540945642686255104, 
+    1540971960958451832, 
+    1540972002628870215
+]
 
-# Cấu hình Intents cho discord.py bản mới
-intents = discord.Intents.default()
-intents.messages = True
-intents.message_content = True
-
-client = discord.Client(intents=intents)
+# Khai báo Client cho Selfbot
+client = discord.Client()
 
 def get_vietnamese_word(start_word):
     start_word = start_word.lower().strip()
@@ -51,7 +53,7 @@ def get_vietnamese_word(start_word):
 
 @client.event
 async def on_ready():
-    print(f"=== ĐÃ ĐĂNG NHẬP THÀNH CÔNG: {client.user} ===")
+    print(f"=== DA DANG NHAP SELFBOT: {client.user} ===")
     asyncio.create_task(send_nt_loop())
 
 async def send_nt_loop():
@@ -72,6 +74,7 @@ async def on_message(message):
     if message.channel.id not in CHANNEL_IDS:
         return
 
+    # Tự bỏ qua tin nhắn của chính mình gửi
     if message.author.id == client.user.id:
         return
 
@@ -98,4 +101,5 @@ async def solve_and_reply(channel, start_word):
         await channel.send(answer)
 
 token = os.getenv('DISCORD_TOKEN') or os.getenv('DISCORD-TOKEN')
+# Bật tham số sang True để đăng nhập bằng User Token
 client.run(token)
