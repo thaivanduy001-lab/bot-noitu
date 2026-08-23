@@ -20,10 +20,7 @@ def run_web():
 t = Thread(target=run_web)
 t.start()
 
-CHANNEL_IDS = [1497266748087341076,
-              1485274014308892831,
-              1540945642686255104
-]
+CHANNEL_IDS = [1497266748087341076, 1485274014308892831, 1540945642686255104]
 client = discord.Client()
 
 def get_vietnamese_word(start_word):
