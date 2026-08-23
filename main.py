@@ -60,7 +60,7 @@ async def send_nt_loop():
                     await channel.send(".nt")
             except Exception as e:
                 print(f"Loi gui .nt kenh {ch_id}: {e}")
-        await asyncio.sleep(25)
+        await asyncio.sleep(18)
 
 @client.event
 async def on_message(message):
