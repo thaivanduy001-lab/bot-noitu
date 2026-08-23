@@ -7,6 +7,7 @@ import requests
 from threading import Thread
 from flask import Flask
 
+# Web server giữ Render luôn thức
 app = Flask(__name__)
 
 @app.route('/')
@@ -20,8 +21,10 @@ def run_web():
 t = Thread(target=run_web)
 t.start()
 
-# Danh sách 3 kênh bạn muốn chạy
+# Cấu hình danh sách kênh chat và ID kênh voice
 CHANNEL_IDS = [1497266748087341076, 1485274014308892831, 1540945642686255104, 1540971960958451832, 1540972002628870215]
+VOICE_CHANNEL_ID = 1417884212249493638  # <--- THAY ID KÊNH VOICE CỦA BẠN VÀO ĐÂY
+
 client = discord.Client()
 
 def get_vietnamese_word(start_word):
@@ -46,8 +49,22 @@ def get_vietnamese_word(start_word):
 
 @client.event
 async def on_ready():
-    print(f"=== ĐÃ ĐĂNG NHẬP: {client.user} ===")
+    print(f"=== ĐÃ ĐÃ NG NHẬP: {client.user} ===")
     client.loop.create_task(send_nt_loop())
+    client.loop.create_task(keep_voice_connected())  # Luồng tự treo vào Kênh Voice
+
+async def keep_voice_connected():
+    await client.wait_until_ready()
+    while not client.is_closed():
+        try:
+            if not client.voice_clients:
+                channel = client.get_channel(VOICE_CHANNEL_ID) or await client.fetch_channel(VOICE_CHANNEL_ID)
+                if channel:
+                    await channel.connect(reconnect=True, timeout=30.0)
+                    print(f"[VOICE] Da ket noi vao kenh voice: {channel.name}")
+        except Exception as e:
+            print(f"[VOICE LOI]: {e}")
+        await asyncio.sleep(30)
 
 async def send_nt_loop():
     await client.wait_until_ready()
@@ -64,7 +81,6 @@ async def send_nt_loop():
 
 @client.event
 async def on_message(message):
-    # Kiểm tra xem tin nhắn có thuộc 1 trong 3 kênh không
     if message.channel.id not in CHANNEL_IDS:
         return
 
@@ -93,4 +109,4 @@ async def solve_and_reply(channel, start_word):
         await asyncio.sleep(random.uniform(1.2, 2.5))
         await channel.send(answer)
 
-client.run(os.getenv('DISCORD-TOKEN'))
+client.run(os.getenv('DISCORD_TOKEN'))
