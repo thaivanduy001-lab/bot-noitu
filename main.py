@@ -20,6 +20,7 @@ def run_web():
 t = Thread(target=run_web)
 t.start()
 
+# Danh sách 3 kênh bạn muốn chạy
 CHANNEL_IDS = [1497266748087341076, 1485274014308892831, 1540945642686255104]
 client = discord.Client()
 
@@ -50,24 +51,21 @@ async def on_ready():
 
 async def send_nt_loop():
     await client.wait_until_ready()
-    channel = client.get_channel(CHANNEL_ID)
-    if not channel:
-        try:
-            channel = await client.fetch_channel(CHANNEL_ID)
-        except Exception:
-            return
-
     while not client.is_closed():
-        try:
-            print("[AUTO] Gui .nt...")
-            await channel.send(".nt")
-        except Exception as e:
-            print(f"Loi gui .nt: {e}")
+        for ch_id in CHANNEL_IDS:
+            try:
+                channel = client.get_channel(ch_id) or await client.fetch_channel(ch_id)
+                if channel:
+                    print(f"[AUTO] Gui .nt vao kenh {ch_id}...")
+                    await channel.send(".nt")
+            except Exception as e:
+                print(f"Loi gui .nt kenh {ch_id}: {e}")
         await asyncio.sleep(25)
 
 @client.event
 async def on_message(message):
-    if message.channel.id != CHANNEL_ID:
+    # Kiểm tra xem tin nhắn có thuộc 1 trong 3 kênh không
+    if message.channel.id not in CHANNEL_IDS:
         return
 
     if message.author.id == client.user.id:
@@ -75,7 +73,6 @@ async def on_message(message):
 
     full_text = message.content or ""
     
-    # Đọc thêm cả Footer của Embed
     if message.embeds:
         for embed in message.embeds:
             full_text += " " + (embed.description or "")
@@ -83,17 +80,16 @@ async def on_message(message):
                 full_text += " " + embed.footer.text
             full_text += " " + " ".join([f"{f.name} {f.value}" for f in embed.fields])
 
-    # Bắt từ bắt đầu trong câu: "bắt đầu bằng: được |"
     match = re.search(r"bắt đầu bằng:\s*([^\s\|]+)", full_text, re.IGNORECASE)
     if match:
         start_word = match.group(1).strip()
-        print(f"[PHÁT HIỆN TỪ KHOÁ]: {start_word}")
+        print(f"[KENH {message.channel.id}] Phat hien tu: {start_word}")
         await solve_and_reply(message.channel, start_word)
 
 async def solve_and_reply(channel, start_word):
     answer = get_vietnamese_word(start_word)
     if answer:
-        print(f"[ĐÁP ÁN]: {answer}")
+        print(f"[DAP AN]: {answer}")
         await asyncio.sleep(random.uniform(1.2, 2.5))
         await channel.send(answer)
 
