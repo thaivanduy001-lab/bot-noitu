@@ -9,10 +9,10 @@ from flask import Flask, render_template_string, request, redirect, url_for
 
 # Danh sách cấu hình các kênh (ID kênh & Tên hiển thị)
 CHANNELS_CONFIG = {
-    1497266748087341076: {"name": "thick-pvp", "active": True},
-    1485274014308892831: {"name": "cac", "active": True},
-    1540945642686255104: {"name": "bot", "active": True},
-    1540971960958451832: {"name": "bot2", "active": True},
+    1540390128923578498: {"name": "thick-pvp", "active": True},
+    1540392888968683660: {"name": "cac", "active": True},
+    1478786962403102881: {"name": "bot", "active": True},
+    1422990626995044604: {"name": "bot2", "active": True},
     1540972002628870215: {"name": "bot3", "active": True}
 }
 
