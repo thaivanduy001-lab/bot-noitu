@@ -8,8 +8,8 @@ from threading import Thread
 from flask import Flask
 
 # 1. ĐIỀN THÔNG TIN KÊNH VÀ ACC CHÍNH
-SINGLE_CHANNEL_ID = 1497266748087341076  # <--- ID Kênh chơi game
-MAIN_ACC_ID = 123456789012345678        # <--- ID Discord Acc chính (để clone donate)
+SINGLE_CHANNEL_ID = 1531875015769854054  # <--- ID Kênh chơi game
+MAIN_ACC_ID = 1326098743170170932        # <--- ID Discord Acc chính (để clone donate)
 
 # Lưu danh sách Custom ID của các nút đã có người chọn để tránh chọn trùng
 CLICKED_BUTTON_IDS = set()
