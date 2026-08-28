@@ -1,24 +1,146 @@
 import discord
 import asyncio
-import re
-import random
 import os
-import requests
 from threading import Thread
-from flask import Flask
+from flask import Flask, render_template_string, request, jsonify
 
-# 1. ĐIỀN THÔNG TIN KÊNH VÀ ACC CHÍNH
-SINGLE_CHANNEL_ = 1531875015769854054  # <--- ID Kênh chơi game
-MAIN_ACC_ID = 1326098743170170932        # <--- ID Discord Acc chính (để clone donate)
+# ==========================================
+# CẤU HÌNH CƠ BẢN (SỬA ID Ở ĐÂY)
+# ==========================================
+DEFAULT_VOICE_ID = 1417884212249493638        # ID Kênh Voice (Shadow Glade - Chung)
+CHAT_DONATE_CHANNEL_ID = 1531875015769854054  # <--- SỬA: ID Kênh chat để gõ lệnh .donate
+MAIN_ACC_ID = 1326098743170170932              # <--- SỬA: ID Discord của Acc chính
 
-# Lưu danh sách Custom ID của các nút đã có người chọn để tránh chọn trùng
-CLICKED_BUTTON_IDS = set()
+# Nạp thư viện Opus hỗ trợ Voice trên Server Linux (Render)
+try:
+    discord.opus.load_opus('libopus.so.0')
+except Exception:
+    try:
+        discord.opus.load_opus('libopus.so')
+    except Exception:
+        pass
+
+# Bộ nhớ lưu trữ dữ liệu các Account
+ACCOUNTS_DATA = {} # Format: {token: {"name": str, "voice_enabled": bool, "status": str, "bot_obj": client}}
 
 app = Flask(__name__)
 
+# Giao diện Web Dashboard Quản Lý Voice & Donate
+HTML_DASHBOARD = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Voice Multi-Account Control Panel</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #121212; color: #fff; margin: 0; padding: 15px; }
+        h2 { color: #5865F2; text-align: center; margin-bottom: 20px; }
+        .card { background: #1e1e1e; padding: 20px; border-radius: 10px; margin-bottom: 20px; border: 1px solid #333; box-shadow: 0 4px 10px rgba(0,0,0,0.3); }
+        textarea { width: 100%; padding: 12px; background: #2b2b2b; color: #fff; border: 1px solid #444; border-radius: 6px; box-sizing: border-box; font-size: 14px; }
+        button { background: #5865F2; color: #fff; border: none; padding: 12px 20px; border-radius: 6px; cursor: pointer; font-weight: bold; width: 100%; font-size: 15px; margin-top: 10px; }
+        button:hover { background: #4752C4; }
+        .acc-row { display: flex; align-items: center; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #2d2d2d; }
+        .acc-row:last-child { border-bottom: none; }
+        .badge { padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; }
+        .badge-online { background: #2ed573; color: #000; }
+        .badge-offline { background: #ff4757; color: #fff; }
+        .switch { position: relative; display: inline-block; width: 44px; height: 24px; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #444; transition: .4s; border-radius: 24px; }
+        .slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; }
+        input:checked + .slider { background-color: #2ed573; }
+        input:checked + .slider:before { transform: translateX(20px); }
+    </style>
+</head>
+<body>
+    <h2>🎙️ DISCORD VOICE & AUTO DONATE PANEL</h2>
+    
+    <div class="card">
+        <h3>Thêm / Cập nhật Token</h3>
+        <form action="/add_tokens" method="POST">
+            <p><small style="color: #bbb;">Nhập mỗi Token trên 1 dòng (Định dạng: <code>Token|TênGợiNhớ</code>).</small></p>
+            <textarea name="token_list" rows="5" placeholder="Token_Acc_1|Acc Chính&#10;Token_Acc_2|Clone 1&#10;Token_Acc_3|Clone 2"></textarea>
+            <button type="submit">Lưu & Khởi Chạy Ngay</button>
+        </form>
+    </div>
+
+    <div class="card">
+        <h3>Danh Sách Account Đang Treo (Tổng: {{ accounts|length }})</h3>
+        {% if not accounts %}
+            <p style="color: #888; text-align: center;">Chưa có Account nào được thêm.</p>
+        {% endif %}
+        {% for token, acc in accounts.items() %}
+        <div class="acc-row">
+            <div>
+                <strong>{{ acc.name }}</strong> 
+                <span class="badge {{ 'badge-online' if acc.status == 'Online' else 'badge-offline' }}">{{ acc.status }}</span>
+                <br><small style="color: #888;">Token: {{ token[:14] }}...</small>
+            </div>
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <span style="font-size: 13px; color: #aaa;">Voice:</span>
+                <label class="switch">
+                    <input type="checkbox" onchange="toggleVoice('{{ token }}', this.checked)" {{ 'checked' if acc.voice_enabled else '' }}>
+                    <span class="slider"></span>
+                </label>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    <script>
+        function toggleVoice(token, enabled) {
+            fetch('/toggle_voice', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ token: token, enabled: enabled })
+            });
+        }
+    </script>
+</body>
+</html>
+"""
+
 @app.route('/')
 def home():
-    return "Bot Game Bom 2 Acc Chon So Khac Nhau 24/7!"
+    return render_template_string(HTML_DASHBOARD, accounts=ACCOUNTS_DATA)
+
+@app.route('/add_tokens', methods=['POST'])
+def add_tokens():
+    raw_text = request.form.get('token_list', '')
+    lines = raw_text.strip().split('\n')
+    
+    for line in lines:
+        if not line.strip():
+            continue
+        parts = line.strip().split('|')
+        token = parts[0].strip()
+        custom_name = parts[1].strip() if len(parts) > 1 else "Discord Acc"
+
+        if token not in ACCOUNTS_DATA:
+            ACCOUNTS_DATA[token] = {
+                "name": custom_name,
+                "voice_enabled": True,
+                "status": "Starting...",
+                "bot_obj": None
+            }
+            asyncio.run_coroutine_threadsafe(start_new_account(token, custom_name), bot_loop)
+
+    return "<script>alert('Đã thêm Token thành công!'); window.location.href='/';</script>"
+
+@app.route('/toggle_voice', methods=['POST'])
+def toggle_voice():
+    data = request.json
+    token = data.get('token')
+    enabled = data.get('enabled')
+    if token in ACCOUNTS_DATA:
+        ACCOUNTS_DATA[token]['voice_enabled'] = enabled
+        bot = ACCOUNTS_DATA[token]['bot_obj']
+        if bot:
+            if enabled:
+                asyncio.run_coroutine_threadsafe(bot.join_voice(), bot_loop)
+            else:
+                asyncio.run_coroutine_threadsafe(bot.leave_voice(), bot_loop)
+    return jsonify({"status": "ok"})
 
 def run_web():
     port = int(os.environ.get("PORT", 8080))
@@ -26,144 +148,105 @@ def run_web():
 
 Thread(target=run_web, daemon=True).start()
 
-def get_vietnamese_word(start_word):
-    start_word = start_word.lower().strip()
-    try:
-        url = f"https://vi.wiktionary.org/w/api.php?action=opensearch&search={start_word}&limit=20&format=json"
-        res = requests.get(url, timeout=4).json()
-        suggestions = res[1]
-        for word in suggestions:
-            words = word.lower().split()
-            if len(words) == 2 and words[0] == start_word:
-                return word.lower()
-    except Exception:
-        pass
-
-    backup_dict = {
-        "được": "được việc", "việc": "việc làm", "làm": "làm ăn", "ăn": "ăn uống",
-        "mai": "mai sau", "sau": "sau này", "này": "này nọ", "nọ": "nọ kia"
-    }
-    return backup_dict.get(start_word, f"{start_word} việc")
-
-class SelfBotClient(discord.Client):
-    def __init__(self, acc_name, is_main, *args, **kwargs):
+# ==========================================
+# BOT TREO VOICE & AUTO DONATE HÀNG GIỜ
+# ==========================================
+class VoiceSelfBot(discord.Client):
+    def __init__(self, token, custom_name, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.acc_name = acc_name
-        self.is_main = is_main
-        self.clone_win_count = 0
+        self.user_token = token
+        self.custom_name = custom_name
+        self.vc_client = None
+        self.donate_task = None
 
     async def on_ready(self):
-        print(f"=== [DA KET NOI] {self.acc_name}: {self.user} ===")
-        if self.is_main:
-            asyncio.create_task(self.main_acc_game_loop())
-
-    async def main_acc_game_loop(self):
-        await self.wait_until_ready()
-        await asyncio.sleep(5)
-        while not self.is_closed():
-            try:
-                channel = self.get_channel(SINGLE_CHANNEL_ID) or await self.fetch_channel(SINGLE_CHANNEL_ID)
-                if channel:
-                    print(f"[{self.acc_name}] Gui .bom va .nt...")
-                    await channel.send(".bom")
-                    await asyncio.sleep(2)
-                    await channel.send(".nt")
-            except Exception as e:
-                print(f"[{self.acc_name}] Loi gui lenh: {e}")
-            await asyncio.sleep(30)
-
-    async def on_message(self, message):
-        if message.channel.id != SINGLE_CHANNEL_ID:
-            return
-
-        # Reset bộ nhớ nút đã bấm khi bắt đầu game mới
-        if ".bom" in message.content.lower():
-            CLICKED_BUTTON_IDS.clear()
-
-        # Kiểm tra lượt thắng của Clone để Auto Donate
-        if not self.is_main and ("thắng" in message.content.lower() or "winner" in message.content.lower()):
-            if str(self.user.id) in message.content or (self.user.name and self.user.name.lower() in message.content.lower()):
-                self.clone_win_count += 1
-                print(f"🔥 [{self.acc_name}] Thang Game Bom! ({self.clone_win_count}/5)")
-                
-                if self.clone_win_count >= 5:
-                    print(f"💰 [{self.acc_name}] Thang 5 lan -> Auto .donate cho Acc chinh!")
-                    await asyncio.sleep(2)
-                    await message.channel.send(f".donate <@{MAIN_ACC_ID}> all")
-                    self.clone_win_count = 0
-
-        # Xử lý Game Bom
-        if message.components:
-            await self.handle_bomb_buttons(message)
-
-        if message.author.id == self.user.id:
-            return
-
-        # Xử lý Nối từ
-        full_text = message.content or ""
-        if message.embeds:
-            for embed in message.embeds:
-                full_text += " " + (embed.description or "")
-                if embed.footer and embed.footer.text:
-                    full_text += " " + embed.footer.text
-                full_text += " " + " ".join([f"{f.name} {f.value}" for f in embed.fields])
-
-        match = re.search(r"bắt đầu bằng:\s*([^\s\|]+)", full_text, re.IGNORECASE)
-        if match:
-            start_word = match.group(1).strip()
-            answer = get_vietnamese_word(start_word)
-            if answer:
-                await asyncio.sleep(random.uniform(1.2, 2.5))
-                await message.channel.send(answer)
-
-    async def handle_bomb_buttons(self, message):
-        available_buttons = []
+        real_name = f"{self.user.name}"
+        if self.custom_name == "Discord Acc":
+            self.custom_name = real_name
         
-        # Lọc ra những Button chưa bị disable và CHƯA BỊ ACC KIA CHỌN
-        for row in message.components:
-            for component in row.children:
-                if (component.type == discord.ComponentType.button 
-                    and not component.disabled 
-                    and component.custom_id not in CLICKED_BUTTON_IDS):
-                    available_buttons.append(component)
+        ACCOUNTS_DATA[self.user_token]['name'] = self.custom_name
+        ACCOUNTS_DATA[self.user_token]['status'] = "Online"
+        ACCOUNTS_DATA[self.user_token]['bot_obj'] = self
 
-        if available_buttons:
-            # Phân tách thời gian bấm ngẫu nhiên để 2 acc không bấm trùng khoảnh khắc
-            delay = random.uniform(1.0, 1.8) if self.is_main else random.uniform(2.0, 3.2)
-            await asyncio.sleep(delay)
+        print(f"🟢 [ONLINE] {self.custom_name} ({self.user})")
 
-            # Lọc lại lần nữa phòng trường hợp Acc kia vừa chọn xong trong lúc chờ delay
-            valid_buttons = [b for b in available_buttons if b.custom_id not in CLICKED_BUTTON_IDS]
+        # Tự động nhảy vào Kênh Voice nếu được phép
+        if ACCOUNTS_DATA[self.user_token]['voice_enabled']:
+            await self.join_voice()
+
+        # Bắt đầu vòng lặp auto donate sau mỗi 1 giờ
+        if self.user.id != MAIN_ACC_ID and not self.donate_task:
+            self.donate_task = asyncio.create_task(self.hourly_donate_loop())
+
+    async def join_voice(self):
+        try:
+            channel = self.get_channel(DEFAULT_VOICE_ID) or await self.fetch_channel(DEFAULT_VOICE_ID)
+            if channel and not self.vc_client:
+                self.vc_client = await channel.connect(reconnect=True, self_deaf=True, self_mute=True)
+                print(f"🔊 [{self.custom_name}] Đã vào Kênh Voice {DEFAULT_VOICE_ID}")
+        except Exception as e:
+            print(f"❌ [{self.custom_name}] Lỗi vào Voice: {e}")
+
+    async def leave_voice(self):
+        try:
+            if self.vc_client:
+                await self.vc_client.disconnect(force=True)
+                self.vc_client = None
+                print(f"🔇 [{self.custom_name}] Đã rời Kênh Voice")
+        except Exception as e:
+            print(f"❌ [{self.custom_name}] Lỗi rời Voice: {e}")
+
+    # VÒNG LẶP AUTO DONATE MỖI 1 GIỜ (3600 GIÂY)
+    async def hourly_donate_loop(self):
+        await self.wait_until_ready()
+        while not self.is_closed():
+            # Chờ đúng 60 phút (3600 giây)
+            await asyncio.sleep(3600)
             
-            if valid_buttons:
-                chosen_button = random.choice(valid_buttons)
-                # Đánh dấu nút này đã được chọn
-                CLICKED_BUTTON_IDS.add(chosen_button.custom_id)
-                
-                print(f"[{self.acc_name}] Chon nut so: {chosen_button.label or 'Unknow'}")
+            # Chỉ gửi donate nếu đang kết nối Voice
+            if self.vc_client:
                 try:
-                    await chosen_button.click()
-                except Exception:
-                    pass
+                    chat_channel = self.get_channel(CHAT_DONATE_CHANNEL_ID) or await self.fetch_channel(CHAT_DONATE_CHANNEL_ID)
+                    if chat_channel:
+                        print(f"💰 [{self.custom_name}] Đã treo Voice 1 tiếng -> Tự động .donate cho Acc chính!")
+                        await chat_channel.send(f".donate <@{MAIN_ACC_ID}> all")
+                except Exception as e:
+                    print(f"❌ [{self.custom_name}] Lỗi gửi lệnh donate: {e}")
 
-    async def on_message_edit(self, before, after):
-        if after.channel.id == SINGLE_CHANNEL_ID and after.components:
-            await self.handle_bomb_buttons(after)
+# Hàm khởi tạo Acc mới
+async def start_new_account(token, name):
+    bot = VoiceSelfBot(token=token, custom_name=name)
+    try:
+        await bot.start(token)
+    except Exception as e:
+        print(f"Lỗi Token {token[:12]}: {e}")
+        ACCOUNTS_DATA[token]['status'] = "Lỗi Token"
+
+# Vòng lặp Asyncio chính
+bot_loop = asyncio.new_event_loop()
+
+def start_loop():
+    asyncio.set_event_loop(bot_loop)
+    bot_loop.run_forever()
+
+Thread(target=start_loop, daemon=True).start()
 
 async def main():
     token_string = os.getenv('DISCORD_TOKEN') or os.getenv('DISCORD-TOKEN') or ""
     tokens = [t.strip() for t in token_string.split(",") if t.strip()]
 
-    if len(tokens) < 2:
-        print("LỖI: Chưa đủ 2 Token!")
-        return
+    for idx, token in enumerate(tokens):
+        c_name = f"Acc {idx + 1}"
+        ACCOUNTS_DATA[token] = {
+            "name": c_name,
+            "voice_enabled": True,
+            "status": "Starting...",
+            "bot_obj": None
+        }
+        asyncio.run_coroutine_threadsafe(start_new_account(token, c_name), bot_loop)
 
-    acc_main = SelfBotClient(acc_name="Acc Chinh", is_main=True)
-    acc_clone = SelfBotClient(acc_name="Acc Clone", is_main=False)
+    while True:
+        await asyncio.sleep(3600)
 
-    await asyncio.gather(
-        acc_main.start(tokens[0]),
-        acc_clone.start(tokens[1])
-    )
-
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())
