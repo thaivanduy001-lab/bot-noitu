@@ -1,17 +1,18 @@
 import discord
 import asyncio
 import os
+import re
 from threading import Thread
 from flask import Flask, render_template_string, request, jsonify
 
 # ==========================================
-# CẤU HÌNH CƠ BẢN (ĐÃ CẤU HÌNH ID CỦA BẠN)
+# CẤU HÌNH CƠ BẢN
 # ==========================================
-DEFAULT_VOICE_ID = 1417884212249493638        # ID Kênh Voice (SHADOW GLADE - Chung)
-CHAT_DONATE_CHANNEL_ID = 1531875015769854054  # ID Kênh chat để gõ lệnh .donate
-MAIN_ACC_ID = 1326098743170170932              # ID Discord Acc chính nhận tiền
+DEFAULT_VOICE_ID = 1417884212249493638        # ID Kênh Voice
+CHAT_DONATE_CHANNEL_ID = 1531875015769854054  # ID Kênh chat donate
+MAIN_ACC_ID = 1326098743170170932              # ID Acc chính nhận tiền
 
-# Nạp thư viện Opus hỗ trợ Voice trên Linux (Render)
+# Nạp thư viện Opus hỗ trợ Voice trên Server Linux
 try:
     discord.opus.load_opus('libopus.so.0')
 except Exception:
@@ -25,7 +26,7 @@ ACCOUNTS_DATA = {} # Format: {token: {"name": str, "voice_enabled": bool, "statu
 
 app = Flask(__name__)
 
-# Giao diện Dashboard Quản Lý
+# Giao diện Dashboard Quản Lý Web
 HTML_DASHBOARD = """
 <!DOCTYPE html>
 <html>
@@ -39,11 +40,14 @@ HTML_DASHBOARD = """
         textarea { width: 100%; padding: 12px; background: #2b2b2b; color: #fff; border: 1px solid #444; border-radius: 6px; box-sizing: border-box; font-size: 14px; }
         button { background: #5865F2; color: #fff; border: none; padding: 12px 20px; border-radius: 6px; cursor: pointer; font-weight: bold; width: 100%; font-size: 15px; margin-top: 10px; }
         button:hover { background: #4752C4; }
+        .btn-delete { background: #ff4757; color: white; border: none; padding: 6px 12px; border-radius: 5px; cursor: pointer; font-size: 12px; font-weight: bold; margin-left: 10px; }
+        .btn-delete:hover { background: #ff6b81; }
         .acc-row { display: flex; align-items: center; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #2d2d2d; }
         .acc-row:last-child { border-bottom: none; }
         .badge { padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; }
         .badge-online { background: #2ed573; color: #000; }
         .badge-offline { background: #ff4757; color: #fff; }
+        .badge-starting { background: #ffa500; color: #000; }
         .switch { position: relative; display: inline-block; width: 44px; height: 24px; }
         .switch input { opacity: 0; width: 0; height: 0; }
         .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #444; transition: .4s; border-radius: 24px; }
@@ -58,7 +62,7 @@ HTML_DASHBOARD = """
     <div class="card">
         <h3>Thêm / Cập nhật Token</h3>
         <form action="/add_tokens" method="POST">
-            <p><small style="color: #bbb;">Nhập mỗi Token trên 1 dòng (Định dạng: <code>Token|TênGợiNhớ</code>).</small></p>
+            <p><small style="color: #bbb;">Nhập mỗi Token trên 1 dòng (Định dạng chuẩn: <code>Token|TênGợiNhớ</code>).</small></p>
             <textarea name="token_list" rows="5" placeholder="Token1|Acc1&#10;Token2|Acc2"></textarea>
             <button type="submit">Lưu & Khởi Chạy Ngay</button>
         </form>
@@ -73,15 +77,22 @@ HTML_DASHBOARD = """
         <div class="acc-row">
             <div>
                 <strong>{{ acc.name }}</strong> 
-                <span class="badge {{ 'badge-online' if acc.status == 'Online' else 'badge-offline' }}">{{ acc.status }}</span>
+                {% if acc.status == 'Online' %}
+                    <span class="badge badge-online">Online</span>
+                {% elif acc.status == 'Starting...' %}
+                    <span class="badge badge-starting">Starting...</span>
+                {% else %}
+                    <span class="badge badge-offline">{{ acc.status }}</span>
+                {% endif %}
                 <br><small style="color: #888;">Token: {{ token[:14] }}...</small>
             </div>
-            <div style="display: flex; align-items: center; gap: 10px;">
+            <div style="display: flex; align-items: center; gap: 8px;">
                 <span style="font-size: 13px; color: #aaa;">Voice:</span>
                 <label class="switch">
                     <input type="checkbox" onchange="toggleVoice('{{ token }}', this.checked)" {{ 'checked' if acc.voice_enabled else '' }}>
                     <span class="slider"></span>
                 </label>
+                <button class="btn-delete" onclick="deleteAcc('{{ token }}')">Xóa</button>
             </div>
         </div>
         {% endfor %}
@@ -94,6 +105,16 @@ HTML_DASHBOARD = """
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ token: token, enabled: enabled })
             });
+        }
+
+        function deleteAcc(token) {
+            if (confirm("Bạn có chắc muốn xóa tài khoản này khỏi danh sách?")) {
+                fetch('/delete_account', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ token: token })
+                }).then(() => location.reload());
+            }
         }
     </script>
 </body>
@@ -116,7 +137,7 @@ def add_tokens():
         token = parts[0].strip()
         custom_name = parts[1].strip() if len(parts) > 1 else "Discord Acc"
 
-        if token not in ACCOUNTS_DATA or ACCOUNTS_DATA[token]['status'] != 'Online':
+        if token not in ACCOUNTS_DATA or ACCOUNTS_DATA[token]['status'] not in ['Online', 'Starting...']:
             ACCOUNTS_DATA[token] = {
                 "name": custom_name,
                 "voice_enabled": True,
@@ -125,7 +146,7 @@ def add_tokens():
             }
             asyncio.run_coroutine_threadsafe(start_new_account(token, custom_name), bot_loop)
 
-    return "<script>alert('Đã thêm Token!'); window.location.href='/';</script>"
+    return "<script>alert('Đã xử lý danh sách Token!'); window.location.href='/';</script>"
 
 @app.route('/toggle_voice', methods=['POST'])
 def toggle_voice():
@@ -142,6 +163,18 @@ def toggle_voice():
                 asyncio.run_coroutine_threadsafe(bot.leave_voice(), bot_loop)
     return jsonify({"status": "ok"})
 
+@app.route('/delete_account', methods=['POST'])
+def delete_account():
+    data = request.json
+    token = data.get('token')
+    if token in ACCOUNTS_DATA:
+        bot = ACCOUNTS_DATA[token].get('bot_obj')
+        if bot:
+            asyncio.run_coroutine_threadsafe(bot.close(), bot_loop)
+        del ACCOUNTS_DATA[token]
+        print(f"🗑️ Đã xóa Account khỏi danh sách bộ nhớ.")
+    return jsonify({"status": "ok"})
+
 def run_web():
     port = int(os.environ.get("PORT", 8080))
     app.run(host='0.0.0.0', port=port)
@@ -149,7 +182,7 @@ def run_web():
 Thread(target=run_web, daemon=True).start()
 
 # ==========================================
-# CLASS BOT TREO VOICE & BẢO VỆ KẾT NỐI
+# CLASS BOT TREO VOICE & AUTO DONATE THÔNG MINH
 # ==========================================
 class VoiceSelfBot(discord.Client):
     def __init__(self, token, custom_name, *args, **kwargs):
@@ -158,6 +191,7 @@ class VoiceSelfBot(discord.Client):
         self.custom_name = custom_name
         self.donate_task = None
         self.keep_alive_task = None
+        self.waiting_for_balance = False
 
     async def on_ready(self):
         real_name = f"{self.user.name}"
@@ -170,24 +204,45 @@ class VoiceSelfBot(discord.Client):
 
         print(f"🟢 [ONLINE] {self.custom_name} ({self.user})")
 
-        # Chờ 3s cho Gateway ổn định rồi nhảy vào Voice
-        await asyncio.sleep(3)
-        if ACCOUNTS_DATA[self.user_token]['voice_enabled']:
+        await asyncio.sleep(2)
+        if ACCOUNTS_DATA.get(self.user_token, {}).get('voice_enabled', False):
             await self.join_voice()
 
-        # Kích hoạtAuto Donate mỗi 1 giờ cho các tài khoản Clone
         if str(self.user.id) != str(MAIN_ACC_ID) and not self.donate_task:
             self.donate_task = asyncio.create_task(self.hourly_donate_loop())
 
-        # Kích hoạt vòng lặp kiểm tra trạng thái Voice định kỳ (Mỗi 60 giây)
         if not self.keep_alive_task:
             self.keep_alive_task = asyncio.create_task(self.keep_voice_alive_loop())
+
+    # LẮNG NGHE PHẢN HỒI SỐ TIỀN TỪ BOT GAME HEHE
+    async def on_message(self, message):
+        if message.channel.id == CHAT_DONATE_CHANNEL_ID and self.waiting_for_balance:
+            content = message.content or ""
+            
+            if message.embeds:
+                for embed in message.embeds:
+                    if embed.description: content += " " + embed.description
+                    if embed.title: content += " " + embed.title
+                    for field in embed.fields: content += f" {field.name} {field.value}"
+
+            clean_text = content.replace('.', '').replace(',', '')
+            numbers = re.findall(r'\d+', clean_text)
+
+            if numbers:
+                amount = max([int(n) for n in numbers])
+                if amount > 0:
+                    self.waiting_for_balance = False
+                    print(f"💰 [{self.custom_name}] Check được số tiền: {amount:,} xu. Tiến hành Donate...")
+                    await asyncio.sleep(2)
+                    await message.channel.send(f".donate <@{MAIN_ACC_ID}> {amount}")
+                else:
+                    print(f"💸 [{self.custom_name}] Số dư là 0 xu, bỏ qua donate.")
+                    self.waiting_for_balance = False
 
     async def join_voice(self):
         try:
             channel = self.get_channel(DEFAULT_VOICE_ID) or await self.fetch_channel(DEFAULT_VOICE_ID)
             if channel:
-                # Gửi Gateway WebSocket State trực tiếp (Mute & Deaf để tiết kiệm tài nguyên)
                 await self.ws.voice_state(channel.guild.id, channel.id, self_mute=True, self_deaf=True)
                 print(f"🔊 [{self.custom_name}] Đã vào Kênh Voice {DEFAULT_VOICE_ID}")
         except Exception as e:
@@ -202,17 +257,14 @@ class VoiceSelfBot(discord.Client):
         except Exception as e:
             print(f"❌ [{self.custom_name}] Lỗi rời Voice: {e}")
 
-    # XỬ LÝ SỰ KIỆN KHI BỊ KICK / MOVE RA KHỎI VOICE
     async def on_voice_state_update(self, member, before, after):
         if member.id == self.user.id:
-            # Bị thoát hoặc bị kick ra khỏi Kênh
             if before.channel and after.channel is None:
                 if ACCOUNTS_DATA.get(self.user_token, {}).get('voice_enabled', False):
-                    print(f"⚠️ [{self.custom_name}] Bị kick/rời khỏi Voice! Tiến hành nhảy lại vào Voice sau 5 giây...")
+                    print(f"⚠️ [{self.custom_name}] Bị kick/rời khỏi Voice! Nhảy lại sau 5 giây...")
                     await asyncio.sleep(5)
                     await self.join_voice()
 
-    # VÒNG LẶP CHECK ĐỊNH KỲ MỖI 60 GIÂY
     async def keep_voice_alive_loop(self):
         await self.wait_until_ready()
         while not self.is_closed():
@@ -223,32 +275,42 @@ class VoiceSelfBot(discord.Client):
                     if channel:
                         guild = channel.guild
                         if guild and guild.me and guild.me.voice is None:
-                            print(f"🔄 [{self.custom_name}] Phát hiện mất kết nối Voice. Đang Auto Join lại...")
+                            print(f"🔄 [{self.custom_name}] Auto Join lại Voice...")
                             await self.join_voice()
-                except Exception as e:
+                except Exception:
                     pass
 
-    # VÒNG LẶP AUTO DONATE HÀNG GIỜ (3600 GIÂY)
     async def hourly_donate_loop(self):
         await self.wait_until_ready()
         while not self.is_closed():
-            await asyncio.sleep(3600)
+            await asyncio.sleep(3600) # Treo đủ 1 tiếng tự động check & donate
             if ACCOUNTS_DATA.get(self.user_token, {}).get('voice_enabled', False):
                 try:
                     chat_channel = self.get_channel(CHAT_DONATE_CHANNEL_ID) or await self.fetch_channel(CHAT_DONATE_CHANNEL_ID)
                     if chat_channel:
-                        print(f"💰 [{self.custom_name}] Đã treo đủ 1 giờ -> Tự động .donate cho Acc chính!")
-                        await chat_channel.send(f".donate <@{MAIN_ACC_ID}> all")
+                        print(f"🔍 [{self.custom_name}] Gửi lệnh .tien để kiểm tra số dư...")
+                        self.waiting_for_balance = True
+                        await chat_channel.send(".tien")
+
+                        await asyncio.sleep(15)
+                        if self.waiting_for_balance:
+                            self.waiting_for_balance = False
+                            print(f"⚠️ [{self.custom_name}] Bot Hehe không phản hồi số tiền.")
                 except Exception as e:
-                    print(f"❌ [{self.custom_name}] Lỗi gửi lệnh donate: {e}")
+                    print(f"❌ [{self.custom_name}] Lỗi donate: {e}")
 
 async def start_new_account(token, name):
     bot = VoiceSelfBot(token=token, custom_name=name)
     try:
-        await bot.start(token)
+        await asyncio.wait_for(bot.start(token), timeout=30.0)
+    except asyncio.TimeoutError:
+        print(f"⚠️ [{name}] Đăng nhập Timeout (Rate limit)!")
+        if token in ACCOUNTS_DATA:
+            ACCOUNTS_DATA[token]['status'] = "Lỗi Kết Nối"
     except Exception as e:
-        print(f"❌ Lỗi Token {token[:12]}: {e}")
-        ACCOUNTS_DATA[token]['status'] = "Lỗi Token"
+        print(f"❌ Lỗi Token [{name}]: {e}")
+        if token in ACCOUNTS_DATA:
+            ACCOUNTS_DATA[token]['status'] = "Lỗi Token"
 
 bot_loop = asyncio.new_event_loop()
 
@@ -271,6 +333,7 @@ async def main():
             "bot_obj": None
         }
         asyncio.run_coroutine_threadsafe(start_new_account(token, c_name), bot_loop)
+        await asyncio.sleep(3)
 
     while True:
         await asyncio.sleep(3600)
