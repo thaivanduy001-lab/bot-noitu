@@ -12,15 +12,6 @@ DEFAULT_VOICE_ID = 1417884212249493638        # ID Kênh Voice
 CHAT_DONATE_CHANNEL_ID = 1531875015769854054  # ID Kênh chat donate
 MAIN_ACC_ID = 1326098743170170932              # ID Acc chính nhận tiền
 
-# Nạp thư viện Opus hỗ trợ Voice trên Server Linux
-try:
-    discord.opus.load_opus('libopus.so.0')
-except Exception:
-    try:
-        discord.opus.load_opus('libopus.so')
-    except Exception:
-        pass
-
 # Bộ nhớ lưu trữ dữ liệu các Account
 ACCOUNTS_DATA = {} # Format: {token: {"name": str, "voice_enabled": bool, "status": str, "bot_obj": client}}
 
@@ -62,7 +53,7 @@ HTML_DASHBOARD = """
     <div class="card">
         <h3>Thêm / Cập nhật Token</h3>
         <form action="/add_tokens" method="POST">
-            <p><small style="color: #bbb;">Nhập mỗi Token trên 1 dòng (Định dạng chuẩn: <code>Token|TênGợiNhớ</code>).</small></p>
+            <p><small style="color: #bbb;">Nhập mỗi Token trên 1 dòng (Định dạng: <code>Token|TênGợiNhớ</code>).</small></p>
             <textarea name="token_list" rows="5" placeholder="Token1|Acc1&#10;Token2|Acc2"></textarea>
             <button type="submit">Lưu & Khởi Chạy Ngay</button>
         </form>
@@ -182,7 +173,7 @@ def run_web():
 Thread(target=run_web, daemon=True).start()
 
 # ==========================================
-# CLASS BOT TREO VOICE & AUTO DONATE THÔNG MINH
+# CLASS BOT TREO VOICE CHỐNG CRASH
 # ==========================================
 class VoiceSelfBot(discord.Client):
     def __init__(self, token, custom_name, *args, **kwargs):
@@ -204,7 +195,7 @@ class VoiceSelfBot(discord.Client):
 
         print(f"🟢 [ONLINE] {self.custom_name} ({self.user})")
 
-        await asyncio.sleep(2)
+        await asyncio.sleep(3)
         if ACCOUNTS_DATA.get(self.user_token, {}).get('voice_enabled', False):
             await self.join_voice()
 
@@ -213,6 +204,52 @@ class VoiceSelfBot(discord.Client):
 
         if not self.keep_alive_task:
             self.keep_alive_task = asyncio.create_task(self.keep_voice_alive_loop())
+
+    async def join_voice(self):
+        try:
+            channel = self.get_channel(DEFAULT_VOICE_ID) or await self.fetch_channel(DEFAULT_VOICE_ID)
+            if channel:
+                # Dùng Gateway WebSocket State thuần thay vì Voice Client UDP để chống crash
+                await self.change_presence(status=discord.Status.online)
+                await self.ws.voice_state(channel.guild.id, channel.id, self_mute=True, self_deaf=True)
+                print(f"🔊 [{self.custom_name}] Kết nối Voice {DEFAULT_VOICE_ID} thành công!")
+        except Exception as e:
+            print(f"❌ [{self.custom_name}] Lỗi vào Voice: {e}")
+
+    async def leave_voice(self):
+        try:
+            channel = self.get_channel(DEFAULT_VOICE_ID)
+            if channel:
+                await self.ws.voice_state(channel.guild.id, None)
+                print(f"🔇 [{self.custom_name}] Đã rời Kênh Voice")
+        except Exception as e:
+            print(f"❌ [{self.custom_name}] Lỗi rời Voice: {e}")
+
+    # BẮT SỰ KIỆN KHI BỊ DISCONNECT/CRASH KHỎI VOICE
+    async def on_voice_state_update(self, member, before, after):
+        if member.id == self.user.id:
+            # Nếu bị ngắt kết nối voice ngoài ý muốn
+            if before.channel and after.channel is None:
+                if ACCOUNTS_DATA.get(self.user_token, {}).get('voice_enabled', False):
+                    print(f"⚠️ [{self.custom_name}] Bị ngắt kết nối Voice! Đang kết nối lại sau 3s...")
+                    await asyncio.sleep(3)
+                    await self.join_voice()
+
+    # CHECK VÀ GIỮ VOICE CONTINUOUS (15 GIÂY / LẦN)
+    async def keep_voice_alive_loop(self):
+        await self.wait_until_ready()
+        while not self.is_closed():
+            await asyncio.sleep(15) # Kiểm tra liên tục mỗi 15 giây
+            if ACCOUNTS_DATA.get(self.user_token, {}).get('voice_enabled', False):
+                try:
+                    channel = self.get_channel(DEFAULT_VOICE_ID)
+                    if channel and channel.guild:
+                        me = channel.guild.get_member(self.user.id)
+                        if me and me.voice is None:
+                            print(f"🔄 [{self.custom_name}] Phát hiện văng Voice -> Đang kết nối lại...")
+                            await self.join_voice()
+                except Exception:
+                    pass
 
     # LẮNG NGHE PHẢN HỒI SỐ TIỀN TỪ BOT GAME HEHE
     async def on_message(self, message):
@@ -232,58 +269,17 @@ class VoiceSelfBot(discord.Client):
                 amount = max([int(n) for n in numbers])
                 if amount > 0:
                     self.waiting_for_balance = False
-                    print(f"💰 [{self.custom_name}] Check được số tiền: {amount:,} xu. Tiến hành Donate...")
+                    print(f"💰 [{self.custom_name}] Số dư: {amount:,} xu -> Donate cho Acc chính...")
                     await asyncio.sleep(2)
                     await message.channel.send(f".donate <@{MAIN_ACC_ID}> {amount}")
                 else:
-                    print(f"💸 [{self.custom_name}] Số dư là 0 xu, bỏ qua donate.")
+                    print(f"💸 [{self.custom_name}] Số dư bằng 0 xu.")
                     self.waiting_for_balance = False
-
-    async def join_voice(self):
-        try:
-            channel = self.get_channel(DEFAULT_VOICE_ID) or await self.fetch_channel(DEFAULT_VOICE_ID)
-            if channel:
-                await self.ws.voice_state(channel.guild.id, channel.id, self_mute=True, self_deaf=True)
-                print(f"🔊 [{self.custom_name}] Đã vào Kênh Voice {DEFAULT_VOICE_ID}")
-        except Exception as e:
-            print(f"❌ [{self.custom_name}] Lỗi vào Voice: {e}")
-
-    async def leave_voice(self):
-        try:
-            channel = self.get_channel(DEFAULT_VOICE_ID)
-            if channel:
-                await self.ws.voice_state(channel.guild.id, None)
-                print(f"🔇 [{self.custom_name}] Đã rời Kênh Voice")
-        except Exception as e:
-            print(f"❌ [{self.custom_name}] Lỗi rời Voice: {e}")
-
-    async def on_voice_state_update(self, member, before, after):
-        if member.id == self.user.id:
-            if before.channel and after.channel is None:
-                if ACCOUNTS_DATA.get(self.user_token, {}).get('voice_enabled', False):
-                    print(f"⚠️ [{self.custom_name}] Bị kick/rời khỏi Voice! Nhảy lại sau 5 giây...")
-                    await asyncio.sleep(5)
-                    await self.join_voice()
-
-    async def keep_voice_alive_loop(self):
-        await self.wait_until_ready()
-        while not self.is_closed():
-            await asyncio.sleep(60)
-            if ACCOUNTS_DATA.get(self.user_token, {}).get('voice_enabled', False):
-                try:
-                    channel = self.get_channel(DEFAULT_VOICE_ID)
-                    if channel:
-                        guild = channel.guild
-                        if guild and guild.me and guild.me.voice is None:
-                            print(f"🔄 [{self.custom_name}] Auto Join lại Voice...")
-                            await self.join_voice()
-                except Exception:
-                    pass
 
     async def hourly_donate_loop(self):
         await self.wait_until_ready()
         while not self.is_closed():
-            await asyncio.sleep(3600) # Treo đủ 1 tiếng tự động check & donate
+            await asyncio.sleep(3600)
             if ACCOUNTS_DATA.get(self.user_token, {}).get('voice_enabled', False):
                 try:
                     chat_channel = self.get_channel(CHAT_DONATE_CHANNEL_ID) or await self.fetch_channel(CHAT_DONATE_CHANNEL_ID)
@@ -295,16 +291,15 @@ class VoiceSelfBot(discord.Client):
                         await asyncio.sleep(15)
                         if self.waiting_for_balance:
                             self.waiting_for_balance = False
-                            print(f"⚠️ [{self.custom_name}] Bot Hehe không phản hồi số tiền.")
                 except Exception as e:
                     print(f"❌ [{self.custom_name}] Lỗi donate: {e}")
 
 async def start_new_account(token, name):
     bot = VoiceSelfBot(token=token, custom_name=name)
     try:
-        await asyncio.wait_for(bot.start(token), timeout=30.0)
+        await asyncio.wait_for(bot.start(token), timeout=90.0)
     except asyncio.TimeoutError:
-        print(f"⚠️ [{name}] Đăng nhập Timeout (Rate limit)!")
+        print(f"⚠️ [{name}] Đăng nhập Timeout!")
         if token in ACCOUNTS_DATA:
             ACCOUNTS_DATA[token]['status'] = "Lỗi Kết Nối"
     except Exception as e:
