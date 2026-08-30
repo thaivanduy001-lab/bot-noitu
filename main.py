@@ -3,111 +3,40 @@ import asyncio
 import os
 import re
 from threading import Thread
-from flask import Flask, render_template_string, request, jsonify
+from flask import Flask, render_template_string
 
 # ==========================================
 # CẤU HÌNH CƠ BẢN
 # ==========================================
-DEFAULT_VOICE_ID = 1417884212249493638        # ID Kênh Voice
-CHAT_DONATE_CHANNEL_ID = 1531875015769854054  # ID Kênh chat donate
-MAIN_ACC_ID = 1326098743170170932              # ID Acc chính nhận tiền
+CHAT_GAME_CHANNEL_ID = 1531875015769854054  # ID Kênh chat chơi game Bom
 
-# Bộ nhớ lưu trữ dữ liệu các Account
-ACCOUNTS_DATA = {} # Format: {token: {"name": str, "voice_enabled": bool, "status": str, "bot_obj": client}}
+ACCOUNTS_DATA = {}
 
 app = Flask(__name__)
 
-# Giao diện Dashboard Quản Lý Web
+# Dashboard đơn giản xem trạng thái Bot
 HTML_DASHBOARD = """
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Voice Multi-Account Control Panel</title>
+    <title>Discord Game Bom Bot</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #121212; color: #fff; margin: 0; padding: 15px; }
-        h2 { color: #5865F2; text-align: center; margin-bottom: 20px; }
-        .card { background: #1e1e1e; padding: 20px; border-radius: 10px; margin-bottom: 20px; border: 1px solid #333; box-shadow: 0 4px 10px rgba(0,0,0,0.3); }
-        textarea { width: 100%; padding: 12px; background: #2b2b2b; color: #fff; border: 1px solid #444; border-radius: 6px; box-sizing: border-box; font-size: 14px; }
-        button { background: #5865F2; color: #fff; border: none; padding: 12px 20px; border-radius: 6px; cursor: pointer; font-weight: bold; width: 100%; font-size: 15px; margin-top: 10px; }
-        button:hover { background: #4752C4; }
-        .btn-delete { background: #ff4757; color: white; border: none; padding: 6px 12px; border-radius: 5px; cursor: pointer; font-size: 12px; font-weight: bold; margin-left: 10px; }
-        .btn-delete:hover { background: #ff6b81; }
-        .acc-row { display: flex; align-items: center; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #2d2d2d; }
-        .acc-row:last-child { border-bottom: none; }
-        .badge { padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; }
-        .badge-online { background: #2ed573; color: #000; }
-        .badge-offline { background: #ff4757; color: #fff; }
-        .badge-starting { background: #ffa500; color: #000; }
-        .switch { position: relative; display: inline-block; width: 44px; height: 24px; }
-        .switch input { opacity: 0; width: 0; height: 0; }
-        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #444; transition: .4s; border-radius: 24px; }
-        .slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; }
-        input:checked + .slider { background-color: #2ed573; }
-        input:checked + .slider:before { transform: translateX(20px); }
+        body { font-family: sans-serif; background: #121212; color: #fff; padding: 20px; }
+        .card { background: #1e1e1e; padding: 15px; border-radius: 8px; margin-bottom: 10px; }
+        .status { padding: 3px 8px; border-radius: 4px; font-weight: bold; }
+        .online { background: #2ed573; color: #000; }
+        .offline { background: #ff4757; color: #fff; }
     </style>
 </head>
 <body>
-    <h2>🎙️ DISCORD VOICE & AUTO DONATE PANEL</h2>
-    
+    <h2>💣 DISCORD AUTO GAME BOM PANEL</h2>
     <div class="card">
-        <h3>Thêm / Cập nhật Token</h3>
-        <form action="/add_tokens" method="POST">
-            <p><small style="color: #bbb;">Nhập mỗi Token trên 1 dòng (Định dạng: <code>Token|TênGợiNhớ</code>).</small></p>
-            <textarea name="token_list" rows="5" placeholder="Token1|Acc1&#10;Token2|Acc2"></textarea>
-            <button type="submit">Lưu & Khởi Chạy Ngay</button>
-        </form>
-    </div>
-
-    <div class="card">
-        <h3>Danh Sách Account Đang Treo (Tổng: {{ accounts|length }})</h3>
-        {% if not accounts %}
-            <p style="color: #888; text-align: center;">Chưa có Account nào được thêm.</p>
-        {% endif %}
+        <h3>Trạng thái Bot Game (Tổng: {{ accounts|length }})</h3>
         {% for token, acc in accounts.items() %}
-        <div class="acc-row">
-            <div>
-                <strong>{{ acc.name }}</strong> 
-                {% if acc.status == 'Online' %}
-                    <span class="badge badge-online">Online</span>
-                {% elif acc.status == 'Starting...' %}
-                    <span class="badge badge-starting">Starting...</span>
-                {% else %}
-                    <span class="badge badge-offline">{{ acc.status }}</span>
-                {% endif %}
-                <br><small style="color: #888;">Token: {{ token[:14] }}...</small>
-            </div>
-            <div style="display: flex; align-items: center; gap: 8px;">
-                <span style="font-size: 13px; color: #aaa;">Voice:</span>
-                <label class="switch">
-                    <input type="checkbox" onchange="toggleVoice('{{ token }}', this.checked)" {{ 'checked' if acc.voice_enabled else '' }}>
-                    <span class="slider"></span>
-                </label>
-                <button class="btn-delete" onclick="deleteAcc('{{ token }}')">Xóa</button>
-            </div>
-        </div>
+            <p><strong>{{ acc.name }}</strong> - <span class="status {{ 'online' if acc.status == 'Online' else 'offline' }}">{{ acc.status }}</span></p>
         {% endfor %}
     </div>
-
-    <script>
-        function toggleVoice(token, enabled) {
-            fetch('/toggle_voice', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ token: token, enabled: enabled })
-            });
-        }
-
-        function deleteAcc(token) {
-            if (confirm("Bạn có chắc muốn xóa tài khoản này khỏi danh sách?")) {
-                fetch('/delete_account', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ token: token })
-                }).then(() => location.reload());
-            }
-        }
-    </script>
 </body>
 </html>
 """
@@ -116,56 +45,6 @@ HTML_DASHBOARD = """
 def home():
     return render_template_string(HTML_DASHBOARD, accounts=ACCOUNTS_DATA)
 
-@app.route('/add_tokens', methods=['POST'])
-def add_tokens():
-    raw_text = request.form.get('token_list', '')
-    lines = raw_text.strip().split('\n')
-    
-    for line in lines:
-        if not line.strip():
-            continue
-        parts = line.strip().split('|')
-        token = parts[0].strip()
-        custom_name = parts[1].strip() if len(parts) > 1 else "Discord Acc"
-
-        if token not in ACCOUNTS_DATA or ACCOUNTS_DATA[token]['status'] not in ['Online', 'Starting...']:
-            ACCOUNTS_DATA[token] = {
-                "name": custom_name,
-                "voice_enabled": True,
-                "status": "Starting...",
-                "bot_obj": None
-            }
-            asyncio.run_coroutine_threadsafe(start_new_account(token, custom_name), bot_loop)
-
-    return "<script>alert('Đã xử lý danh sách Token!'); window.location.href='/';</script>"
-
-@app.route('/toggle_voice', methods=['POST'])
-def toggle_voice():
-    data = request.json
-    token = data.get('token')
-    enabled = data.get('enabled')
-    if token in ACCOUNTS_DATA:
-        ACCOUNTS_DATA[token]['voice_enabled'] = enabled
-        bot = ACCOUNTS_DATA[token]['bot_obj']
-        if bot:
-            if enabled:
-                asyncio.run_coroutine_threadsafe(bot.join_voice(), bot_loop)
-            else:
-                asyncio.run_coroutine_threadsafe(bot.leave_voice(), bot_loop)
-    return jsonify({"status": "ok"})
-
-@app.route('/delete_account', methods=['POST'])
-def delete_account():
-    data = request.json
-    token = data.get('token')
-    if token in ACCOUNTS_DATA:
-        bot = ACCOUNTS_DATA[token].get('bot_obj')
-        if bot:
-            asyncio.run_coroutine_threadsafe(bot.close(), bot_loop)
-        del ACCOUNTS_DATA[token]
-        print(f"🗑️ Đã xóa Account khỏi danh sách bộ nhớ.")
-    return jsonify({"status": "ok"})
-
 def run_web():
     port = int(os.environ.get("PORT", 8080))
     app.run(host='0.0.0.0', port=port)
@@ -173,139 +52,94 @@ def run_web():
 Thread(target=run_web, daemon=True).start()
 
 # ==========================================
-# CLASS BOT TREO VOICE CHỐNG CRASH
+# CƠ CHẾ BOT CHƠI BOM THÔNG MINH (NO DONATE)
 # ==========================================
-class VoiceSelfBot(discord.Client):
-    def __init__(self, token, custom_name, *args, **kwargs):
+class BomGameBot(discord.Client):
+    def __init__(self, token, acc_index, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.user_token = token
-        self.custom_name = custom_name
-        self.donate_task = None
-        self.keep_alive_task = None
-        self.waiting_for_balance = False
+        self.acc_index = acc_index # 1 là Acc 1, 2 là Acc 2
+        self.game_count = 0        # Đếm số ván đã chơi
+        self.last_bomb_num = None  # Số bom nổ ván trước (1-9)
 
     async def on_ready(self):
-        real_name = f"{self.user.name}"
-        if self.custom_name == "Discord Acc":
-            self.custom_name = real_name
-        
-        ACCOUNTS_DATA[self.user_token]['name'] = self.custom_name
+        ACCOUNTS_DATA[self.user_token]['name'] = f"{self.user.name} (Acc {self.acc_index})"
         ACCOUNTS_DATA[self.user_token]['status'] = "Online"
-        ACCOUNTS_DATA[self.user_token]['bot_obj'] = self
+        print(f"🟢 [ONLINE] Bot Game Acc {self.acc_index}: {self.user.name}")
 
-        print(f"🟢 [ONLINE] {self.custom_name} ({self.user})")
-
-        await asyncio.sleep(3)
-        if ACCOUNTS_DATA.get(self.user_token, {}).get('voice_enabled', False):
-            await self.join_voice()
-
-        if str(self.user.id) != str(MAIN_ACC_ID) and not self.donate_task:
-            self.donate_task = asyncio.create_task(self.hourly_donate_loop())
-
-        if not self.keep_alive_task:
-            self.keep_alive_task = asyncio.create_task(self.keep_voice_alive_loop())
-
-    async def join_voice(self):
-        try:
-            channel = self.get_channel(DEFAULT_VOICE_ID) or await self.fetch_channel(DEFAULT_VOICE_ID)
-            if channel:
-                # Dùng Gateway WebSocket State thuần thay vì Voice Client UDP để chống crash
-                await self.change_presence(status=discord.Status.online)
-                await self.ws.voice_state(channel.guild.id, channel.id, self_mute=True, self_deaf=True)
-                print(f"🔊 [{self.custom_name}] Kết nối Voice {DEFAULT_VOICE_ID} thành công!")
-        except Exception as e:
-            print(f"❌ [{self.custom_name}] Lỗi vào Voice: {e}")
-
-    async def leave_voice(self):
-        try:
-            channel = self.get_channel(DEFAULT_VOICE_ID)
-            if channel:
-                await self.ws.voice_state(channel.guild.id, None)
-                print(f"🔇 [{self.custom_name}] Đã rời Kênh Voice")
-        except Exception as e:
-            print(f"❌ [{self.custom_name}] Lỗi rời Voice: {e}")
-
-    # BẮT SỰ KIỆN KHI BỊ DISCONNECT/CRASH KHỎI VOICE
-    async def on_voice_state_update(self, member, before, after):
-        if member.id == self.user.id:
-            # Nếu bị ngắt kết nối voice ngoài ý muốn
-            if before.channel and after.channel is None:
-                if ACCOUNTS_DATA.get(self.user_token, {}).get('voice_enabled', False):
-                    print(f"⚠️ [{self.custom_name}] Bị ngắt kết nối Voice! Đang kết nối lại sau 3s...")
-                    await asyncio.sleep(3)
-                    await self.join_voice()
-
-    # CHECK VÀ GIỮ VOICE CONTINUOUS (15 GIÂY / LẦN)
-    async def keep_voice_alive_loop(self):
-        await self.wait_until_ready()
-        while not self.is_closed():
-            await asyncio.sleep(15) # Kiểm tra liên tục mỗi 15 giây
-            if ACCOUNTS_DATA.get(self.user_token, {}).get('voice_enabled', False):
-                try:
-                    channel = self.get_channel(DEFAULT_VOICE_ID)
-                    if channel and channel.guild:
-                        me = channel.guild.get_member(self.user.id)
-                        if me and me.voice is None:
-                            print(f"🔄 [{self.custom_name}] Phát hiện văng Voice -> Đang kết nối lại...")
-                            await self.join_voice()
-                except Exception:
-                    pass
-
-    # LẮNG NGHE PHẢN HỒI SỐ TIỀN TỪ BOT GAME HEHE
     async def on_message(self, message):
-        if message.channel.id == CHAT_DONATE_CHANNEL_ID and self.waiting_for_balance:
-            content = message.content or ""
-            
-            if message.embeds:
-                for embed in message.embeds:
-                    if embed.description: content += " " + embed.description
-                    if embed.title: content += " " + embed.title
-                    for field in embed.fields: content += f" {field.name} {field.value}"
+        # Chỉ xử lý trong đúng kênh game
+        if message.channel.id != CHAT_GAME_CHANNEL_ID:
+            return
 
-            clean_text = content.replace('.', '').replace(',', '')
-            numbers = re.findall(r'\d+', clean_text)
+        # 1. PHÁT HIỆN LỆNH .bom ĐỂ BẮT ĐẦU VÁN MỚI
+        if message.content.strip().lower() == ".bom":
+            print(f"💣 Phát hiện lệnh .bom từ {message.author.name}")
 
+        # 2. KIỂM TRA KẾT QUẢ VÁN TRƯỚC (XÁC ĐỊNH VỊ TRÍ BOM NỔ)
+        content_to_check = message.content or ""
+        if message.embeds:
+            for embed in message.embeds:
+                if embed.description: content_to_check += " " + embed.description
+                if embed.title: content_to_check += " " + embed.title
+
+        # Lọc vị trí bom nổ (Ví dụ: "nổ tại số 5")
+        if "nổ" in content_to_check.lower() or "bomb" in content_to_check.lower():
+            numbers = re.findall(r'\b[1-9]\b', content_to_check)
             if numbers:
-                amount = max([int(n) for n in numbers])
-                if amount > 0:
-                    self.waiting_for_balance = False
-                    print(f"💰 [{self.custom_name}] Số dư: {amount:,} xu -> Donate cho Acc chính...")
-                    await asyncio.sleep(2)
-                    await message.channel.send(f".donate <@{MAIN_ACC_ID}> {amount}")
-                else:
-                    print(f"💸 [{self.custom_name}] Số dư bằng 0 xu.")
-                    self.waiting_for_balance = False
+                self.last_bomb_num = int(numbers[0])
+                print(f"💥 [Acc {self.acc_index}] Bom ván trước nổ ở số: {self.last_bomb_num}")
 
-    async def hourly_donate_loop(self):
-        await self.wait_until_ready()
-        while not self.is_closed():
-            await asyncio.sleep(3600)
-            if ACCOUNTS_DATA.get(self.user_token, {}).get('voice_enabled', False):
-                try:
-                    chat_channel = self.get_channel(CHAT_DONATE_CHANNEL_ID) or await self.fetch_channel(CHAT_DONATE_CHANNEL_ID)
-                    if chat_channel:
-                        print(f"🔍 [{self.custom_name}] Gửi lệnh .tien để kiểm tra số dư...")
-                        self.waiting_for_balance = True
-                        await chat_channel.send(".tien")
+        # 3. TỰ ĐỘNG BẤM NÚT THAM GIA & CHỌN SỐ
+        if message.components:
+            for row in message.components:
+                for component in row.children:
+                    # A. Nút Bấm Tham Gia Game
+                    if component.label and any(kw in component.label.lower() for kw in ["tham gia", "join", "chơi", "vào"]):
+                        await asyncio.sleep(1 + self.acc_index * 0.5)
+                        try:
+                            await component.click()
+                            self.game_count += 1
+                            print(f"✅ [Acc {self.acc_index}] Đã vào chơi! (Ván {self.game_count})")
+                        except Exception as e:
+                            print(f"❌ [Acc {self.acc_index}] Lỗi bấm nút tham gia: {e}")
 
-                        await asyncio.sleep(15)
-                        if self.waiting_for_balance:
-                            self.waiting_for_balance = False
-                except Exception as e:
-                    print(f"❌ [{self.custom_name}] Lỗi donate: {e}")
+                    # B. Nút Bấm Chọn Số (1-9)
+                    elif component.label and component.label.isdigit():
+                        btn_num = int(component.label)
+                        target_num = self.calculate_target_number()
 
-async def start_new_account(token, name):
-    bot = VoiceSelfBot(token=token, custom_name=name)
+                        if btn_num == target_num:
+                            await asyncio.sleep(1 + self.acc_index * 0.4)
+                            try:
+                                await component.click()
+                                print(f"🎯 [Acc {self.acc_index}] Chọn số {btn_num} ở Ván {self.game_count}")
+                            except Exception as e:
+                                print(f"❌ [Acc {self.acc_index}] Lỗi chọn số {btn_num}: {e}")
+
+    # THUẬT TOÁN CHỌN SỐ (VÁN 1-3 ĐỊ GỒM, VÁN 4 TÁCH RA)
+    def calculate_target_number(self):
+        if not self.last_bomb_num:
+            return 1
+
+        # Ván 1, 2, 3: Cả 2 Acc đều chọn đúng số bom nổ ván trước
+        if self.game_count <= 3:
+            return self.last_bomb_num
+        # Từ Ván 4 trở đi: Tách ra không chọn trùng
+        else:
+            if self.acc_index == 1:
+                return self.last_bomb_num
+            else:
+                next_num = self.last_bomb_num + 1
+                return 1 if next_num > 9 else next_num
+
+async def start_new_account(token, acc_index):
+    bot = BomGameBot(token=token, acc_index=acc_index)
     try:
-        await asyncio.wait_for(bot.start(token), timeout=90.0)
-    except asyncio.TimeoutError:
-        print(f"⚠️ [{name}] Đăng nhập Timeout!")
-        if token in ACCOUNTS_DATA:
-            ACCOUNTS_DATA[token]['status'] = "Lỗi Kết Nối"
+        await bot.start(token)
     except Exception as e:
-        print(f"❌ Lỗi Token [{name}]: {e}")
-        if token in ACCOUNTS_DATA:
-            ACCOUNTS_DATA[token]['status'] = "Lỗi Token"
+        print(f"❌ Lỗi Token Acc {acc_index}: {e}")
+        ACCOUNTS_DATA[token]['status'] = "Lỗi Token"
 
 bot_loop = asyncio.new_event_loop()
 
@@ -320,15 +154,15 @@ async def main():
     tokens = [t.strip() for t in token_string.split(",") if t.strip()]
 
     for idx, token in enumerate(tokens):
-        c_name = f"Acc {idx + 1}"
+        acc_index = idx + 1
+        c_name = f"Acc {acc_index}"
         ACCOUNTS_DATA[token] = {
             "name": c_name,
-            "voice_enabled": True,
             "status": "Starting...",
             "bot_obj": None
         }
-        asyncio.run_coroutine_threadsafe(start_new_account(token, c_name), bot_loop)
-        await asyncio.sleep(3)
+        asyncio.run_coroutine_threadsafe(start_new_account(token, acc_index), bot_loop)
+        await asyncio.sleep(2)
 
     while True:
         await asyncio.sleep(3600)
