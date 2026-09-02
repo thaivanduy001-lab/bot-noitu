@@ -41,8 +41,8 @@ HTML_DASHBOARD = """
     <div class="card">
         <h3>Thêm Token Acc Chơi Game</h3>
         <form action="/add_tokens" method="POST">
-            <p><small style="color: #bbb;">Nhập mỗi Token trên 1 dòng (Dòng 1 là Acc 1 - Auto nhắn .bom, Dòng 2 là Acc 2):</small></p>
-            <textarea name="token_list" rows="4" placeholder="Token_Acc_1&#10;Token_Acc_2"></textarea>
+            <p><small style="color: #bbb;">Nhập mỗi Token trên 1 dòng (Dòng 1 là Acc 1 nhắn .bom):</small></p>
+            <textarea name="token_list" rows="4" placeholder="Token_Acc_1&#10;Token_Acc_2&#10;Token_Acc_3"></textarea>
             <button type="submit">Lưu & Khởi Chạy Ngay</button>
         </form>
     </div>
@@ -121,16 +121,16 @@ def run_web():
 Thread(target=run_web, daemon=True).start()
 
 # ==========================================
-# CƠ CHẾ BOT CHƠI BOM ĐỔI Ô LIÊN TỤC
+# CƠ CHẾ BOT CHƠI BOM & TỰ .BOM KHI HÒA / KẾT THÚC
 # ==========================================
 class BomGameBot(discord.Client):
     def __init__(self, token, acc_index, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.user_token = token
-        self.acc_index = acc_index  # 1 là Acc 1 (Nhắn .bom), 2 là Acc 2
+        self.acc_index = acc_index  # 1 là Acc chính nhắn .bom
         self.game_count = 0         # Số ván game
         self.last_bomb_num = None   # Số bom nổ ván trước
-        self.last_chosen_num = None # Lưu ô vừa bấm vòng trước để KHÔNG bấm trùng lại
+        self.last_chosen_num = None # Ô vừa bấm vòng trước
         self.is_game_running = False
 
     async def on_ready(self):
@@ -139,7 +139,7 @@ class BomGameBot(discord.Client):
         ACCOUNTS_DATA[self.user_token]['bot_obj'] = self
         print(f"🟢 [ONLINE] Acc {self.acc_index}: {self.user.name}")
 
-        # Acc 1 tự nhắn .bom sau khi đăng nhập thành công
+        # Acc 1 tự nhắn .bom khi vừa bật bot
         if self.acc_index == 1:
             await asyncio.sleep(4)
             await self.send_bom_command()
@@ -164,25 +164,24 @@ class BomGameBot(discord.Client):
                 if embed.title: content_to_check += " " + embed.title
                 for field in embed.fields: content_to_check += f" {field.name} {field.value}"
 
-        # 1. GHI NHẬN SỐ BOM NỔ TỪ BOT-HEHE
+        # 1. BẮT SỐ BOM NỔ VÁN TRƯỚC
         if "Ô có bom:" in content_to_check:
             match = re.search(r'Ô có bom:\s*Ô số\s*([1-9])', content_to_check)
             if match:
                 self.last_bomb_num = int(match.group(1))
-                print(f"🎯 [Acc {self.acc_index}] Ghi nhận BOM nổ ở Ô số: {self.last_bomb_num}")
+                print(f"🎯 [Acc {self.acc_index}] Bom nổ ở Ô số: {self.last_bomb_num}")
 
-        # 2. XÁC ĐỊNH VÁN GAME KẾT THÚC -> ACC 1 TỰ NHẮN .bom LẠI
-        if any(kw in content_to_check.lower() for kw in ["trúng bom", "thua", "kết thúc", "chiến thắng", "toàn bộ vòng"]):
-            if self.is_game_running:
+        # 2. PHÁT HIỆN HÒA HOẶC KẾT THÚC GAME -> ACC 1 NHẮN .BOM LẠI
+        if any(kw in content_to_check.lower() for kw in ["hòa!", "hòa", "không còn ai", "trúng bom", "thua", "kết thúc", "chiến thắng", "toàn bộ vòng"]):
+            if self.is_game_running or "hòa" in content_to_check.lower():
                 self.is_game_running = False
-                print(f"🏁 Ván game kết thúc!")
+                print(f"🏁 Phát hiện game kết thúc/Hòa! Acc 1 chuẩn bị gửi lại .bom...")
                 if self.acc_index == 1:
-                    await asyncio.sleep(3)
+                    await asyncio.sleep(2.5) # Giãn cách 2.5s rồi gửi .bom
                     await self.send_bom_command()
 
-        # 3. AUTO BẤM NÚT
+        # 3. AUTO BẤM NÚT (THAM GIA & CHỌN Ô)
         if message.components:
-            # Thu thập các nút bấm đang hiển thị (1-9)
             available_buttons = []
             join_btn = None
 
@@ -194,10 +193,10 @@ class BomGameBot(discord.Client):
                         elif component.label.isdigit():
                             available_buttons.append(component)
 
-            # A. Bấm Tham Gia
+            # A. Nút Bấm Tham Gia
             if join_btn:
                 self.is_game_running = True
-                await asyncio.sleep(0.5 + self.acc_index * 0.4)
+                await asyncio.sleep(0.4 + self.acc_index * 0.3)
                 try:
                     await join_btn.click()
                     self.game_count += 1
@@ -205,48 +204,44 @@ class BomGameBot(discord.Client):
                 except Exception as e:
                     pass
 
-            # B. Bấm Chọn Số (Đảm bảo xoay vòng ô khác nhau liên tục)
+            # B. Nút Bấm Chọn Số
             elif available_buttons:
                 target_num = self.get_dynamic_target_number(available_buttons)
                 
-                # Tìm đúng button có số target_num để bấm
                 for btn in available_buttons:
                     if int(btn.label) == target_num:
-                        await asyncio.sleep(0.5 + self.acc_index * 0.4)
+                        await asyncio.sleep(0.4 + self.acc_index * 0.3)
                         try:
                             await btn.click()
-                            self.last_chosen_num = target_num  # Cập nhật ô vừa bấm
+                            self.last_chosen_num = target_num
                             print(f"🎯 [Acc {self.acc_index}] BẤM SỐ: {target_num} (Ván {self.game_count})")
                         except Exception as e:
                             print(f"❌ [Acc {self.acc_index}] Lỗi bấm số {target_num}: {e}")
                         break
 
-    # LOGIC CHỌN SỐ BIẾN ĐỔI LIÊN TỤC KHÔNG TRÙNG Ô CŨ
     def get_dynamic_target_number(self, available_buttons):
         valid_nums = [int(btn.label) for btn in available_buttons if btn.label.isdigit()]
         
-        # 1. Nếu có dữ liệu ván trước:
+        # 1. Nếu có lịch sử bom nổ ván trước
         if self.last_bomb_num:
-            # Ván 1-3: Chọn theo số bom nổ ván trước (nếu số đó nằm trong danh sách nút active)
+            # Ván 1-3: Chọn đúng ô bom nổ ván trước
             if self.game_count <= 3 and self.last_bomb_num in valid_nums:
                 return self.last_bomb_num
-            # Ván 4+: Acc 1 giữ bom nổ, Acc 2 nhảy sang số khác
+            # Ván 4+: Acc 1 giữ ô bom nổ, các Acc khác tách ra
             elif self.game_count > 3:
                 if self.acc_index == 1 and self.last_bomb_num in valid_nums:
                     return self.last_bomb_num
 
-        # 2. Trường hợp chưa có ván trước / Vòng 2,3,4 của cùng ván / Acc 2 tách số:
-        # Tự động lọc danh sách ô khả thi (loại bỏ ô vừa mới bấm ở vòng trước)
+        # 2. Xoay vòng chọn ô khác nhau liên tục (không lặp ô vừa chọn)
         candidate_nums = [n for n in valid_nums if n != self.last_chosen_num]
-        
         if not candidate_nums:
             candidate_nums = valid_nums
 
-        # Nếu là Acc 2 ở ván > 3, dịch chuyển số khác Acc 1
         if self.acc_index == 2:
-            return random.choice(candidate_nums)
+            return candidate_nums[0]
+        elif self.acc_index == 3:
+            return candidate_nums[-1]
         else:
-            # Chọn ô tiếp theo liên tục để nhảy số (Ví dụ vừa chọn 1 -> chọn 2 -> chọn 3)
             if self.last_chosen_num and (self.last_chosen_num + 1) in candidate_nums:
                 return self.last_chosen_num + 1
             return candidate_nums[0]
